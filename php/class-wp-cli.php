@@ -205,27 +205,35 @@ class CoAuthorsPlus_Command extends WP_CLI_Command {
 
 	/**
 	 * Assign posts associated with a WordPress user to a co-author
-	 * Only apply the changes if there aren't yet co-authors associated with the post
 	 *
 	 * @since 3.0
 	 *
 	 * @subcommand assign-user-to-coauthor
-	 * @synopsis --user_login=<user-login> --coauthor=<coauthor>
+	 * @synopsis [--user_login=<user-login>] [--user_id=<user-id>] --coauthor=<coauthor> [--append_coauthors]
 	 */
 	public function assign_user_to_coauthor( $args, $assoc_args ) {
 		global $coauthors_plus, $wpdb;
 
 		$defaults = array(
-				'user_login'        => '',
+				'user_login'        => NULL,
+				'user_id'           => NULL,
 				'coauthor'          => '',
+				'append_coauthors'  => false,
 			);
 		$assoc_args = wp_parse_args( $assoc_args, $defaults );
 
-		$user = get_user_by( 'login', $assoc_args['user_login'] );
+		$user_id = intval($assoc_args['user_id']);
+		if ( $assoc_args['user_login'] ) {
+			$user = get_user_by( 'login', $assoc_args['user_login'] );
+			if ($user) {
+				$user_id = $user->ID;
+			}
+		}
+
 		$coauthor = $coauthors_plus->get_coauthor_by( 'login', $assoc_args['coauthor'] );
 
-		if ( ! $user ) {
-			WP_CLI::error( __( 'Please specify a valid user_login', 'co-authors-plus' ) );
+		if ( ! $user_id ) {
+			WP_CLI::error( __( 'Please specify a valid user_login or user_id', 'co-authors-plus' ) );
 		}
 
 		if ( ! $coauthor ) {
@@ -233,11 +241,11 @@ class CoAuthorsPlus_Command extends WP_CLI_Command {
 		}
 
 		$post_types = implode( "','", $coauthors_plus->supported_post_types );
-		$posts = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_author=%d AND post_type IN ('$post_types')", $user->ID ) );
+		$posts = $wpdb->get_col( $wpdb->prepare( "SELECT ID FROM $wpdb->posts WHERE post_author=%d AND post_type IN ('$post_types')", $user_id ) );
 		$affected = 0;
 		foreach ( $posts as $post_id ) {
 			$coauthors = cap_get_coauthor_terms_for_post( $post_id );
-			if ( ! empty( $coauthors ) ) {
+			if ( ! empty( $coauthors ) && ! $assoc_args['append_coauthors'] ) {
 				WP_CLI::line( sprintf(
 					__( 'Skipping - Post #%d already has co-authors assigned: %s', 'co-authors-plus' ),
 					$post_id,
@@ -246,7 +254,7 @@ class CoAuthorsPlus_Command extends WP_CLI_Command {
 				continue;
 			}
 
-			$coauthors_plus->add_coauthors( $post_id, array( $coauthor->user_login ) );
+			$coauthors_plus->add_coauthors( $post_id, array( $coauthor->user_login ), true );
 			WP_CLI::line( sprintf( __( "Updating - Adding %s's byline to post #%d", 'co-authors-plus' ), $coauthor->user_login, $post_id ) );
 			$affected++;
 			if ( $affected && 0 === $affected % 100 ) {
